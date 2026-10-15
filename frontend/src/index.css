@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens: RGB channels so Tailwind opacity modifiers keep working. */
+:root {
+  --bg: 242 245 250;
+  --card: 255 255 255;
+  --raised: 246 248 252;
+  --line: 225 231 241;
+  --ink: 13 26 50;
+  --muted: 92 106 132;
+  --accent: 15 181 168;
+  --accent-ink: 8 118 110;
+  --on-accent: 6 20 42;
+  --side: 9 21 45;
+  --danger: 200 40 60;
+  --shadow: 10 24 51;
+
+  --created: 217 132 14;
+  --created-ink: 140 80 4;
+  --transit: 47 107 255;
+  --transit-ink: 34 78 205;
+  --delivered: 13 150 132;
+  --delivered-ink: 7 106 93;
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: 7 14 29;
+  --card: 14 24 46;
+  --raised: 19 31 57;
+  --line: 33 47 77;
+  --ink: 231 237 247;
+  --muted: 146 162 190;
+  --accent: 45 212 198;
+  --accent-ink: 94 234 220;
+  --side: 5 11 24;
+  --danger: 248 113 113;
+  --shadow: 0 0 0;
+
+  --created: 245 168 50;
+  --created-ink: 252 200 110;
+  --transit: 96 143 255;
+  --transit-ink: 150 183 255;
+  --delivered: 45 212 191;
+  --delivered-ink: 110 231 213;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    font-family: theme('fontFamily.sans');
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent-ink));
+    outline-offset: 2px;
+  }
+
+  .sidebar :focus-visible {
+    outline-color: rgb(var(--accent));
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.3);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-card shadow-card;
+  }
+
+  .btn {
+    @apply inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-on-accent hover:brightness-95 active:brightness-90;
+  }
+
+  .btn-secondary {
+    @apply btn border border-line bg-card text-ink hover:bg-raised;
+  }
+
+  .btn-sm {
+    @apply h-8 rounded-md px-3 text-xs;
+  }
+
+  .input {
+    @apply h-10 w-full rounded-lg border border-line bg-card px-3 text-sm text-ink transition-colors placeholder:text-muted/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30;
+  }
+
+  .input[aria-invalid='true'] {
+    border-color: rgb(var(--danger));
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-line/70;
+  }
+
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-card/60 to-transparent;
+    animation: shimmer 1.4s infinite;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+dialog::backdrop {
+  background: rgb(var(--side) / 0.6);
+  backdrop-filter: blur(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
