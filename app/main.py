@@ -133,10 +133,16 @@ def update_shipment_status(
     shipment_id: int,
     update: ShipmentStatusUpdate
 ):
-    shipment = database.update_shipment_status(
-        shipment_id,
-        update.status
-    )
+    try:
+        shipment = database.update_shipment_status(
+            shipment_id,
+            update.status
+        )
+    except database.InvalidStatusTransition as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc)
+        ) from exc
 
     if shipment is None:
         raise HTTPException(
@@ -145,6 +151,7 @@ def update_shipment_status(
         )
 
     return shipment
+
 
 
 ##############################################################################

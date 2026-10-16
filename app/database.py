@@ -22,6 +22,16 @@ DB_PATH = Path(
 )
 
 STATUSES = ("created", "in_transit", "delivered")
+ALLOWED_TRANSITIONS = {
+    "created": {"in_transit"},
+    "in_transit": {"delivered"},
+    "delivered": set(),
+}
+
+
+class InvalidStatusTransition(Exception):
+    """Raised when a shipment status transition is forbidden."""
+    pass
 
 # Readable tracking references: no 0/O or 1/I/L confusion.
 _TRACKING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -319,6 +329,12 @@ def update_shipment_status(shipment_id, status):
             return None
 
         if current["status"] != status:
+            if status not in ALLOWED_TRANSITIONS[current["status"]]:
+                raise InvalidStatusTransition(
+                    f"Cannot change status from "
+                    f"{current['status']} to {status}"
+                )
+
             now = _now()
 
             connection.execute(
