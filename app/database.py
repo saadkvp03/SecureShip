@@ -155,6 +155,16 @@ def init_database():
             )
         """)
 
+        # Session cookies contain opaque random tokens. Only SHA-256 digests
+        # of session tokens are stored server-side; never store raw cookies.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                csrf_token TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
+            )
+        """)
+
         connection.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_shipments_tracking_ref "
             "ON shipments(tracking_ref)"

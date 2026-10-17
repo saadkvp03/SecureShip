@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, Cookie
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app import database
+from app import auth, database
 
 ShipmentStatus = Literal["created", "in_transit", "delivered"]
 
@@ -20,6 +20,7 @@ DEFAULT_FRONTEND_DIR = (
 # Initialize SQLite when the application starts
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    auth.assert_configured()
     database.init_database()
     yield
 
@@ -53,6 +54,38 @@ class ShipmentStatusUpdate(BaseModel):
     status: ShipmentStatus
 
 
+# Cookie-based login: credentials never appear in URLs or browser storage.
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=256)
+
+
+@app.post("/auth/login")
+def login(credentials: LoginRequest, response: Response):
+    if not auth.valid_credentials(credentials.username, credentials.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token, csrf = auth.create_session()
+    auth.set_session_cookie(response, token)
+    response.headers["Cache-Control"] = "no-store"
+    return {"username": credentials.username, "csrf_token": csrf}
+
+
+@app.get("/auth/me")
+def whoami(response: Response, _session: dict = Depends(auth.require_session)):
+    response.headers["Cache-Control"] = "no-store"
+    return {"username": os.environ["SECURESHIP_AUTH_USER"],
+            "csrf_token": _session["csrf_token"]}
+
+
+@app.post("/auth/logout")
+def logout(response: Response, _session: dict = Depends(auth.require_csrf),
+           secureship_session: str | None = Cookie(default=None)):
+    auth.delete_session(secureship_session)
+    response.delete_cookie(auth.COOKIE_NAME, path="/", samesite="strict")
+    response.headers["Cache-Control"] = "no-store"
+    return {"message": "Logged out"}
+
+
 # Home endpoint (JSON contract kept; the web interface lives at /app)
 @app.get("/")
 def home():
@@ -70,7 +103,7 @@ def health_check():
 
 # Create a shipment
 @app.post("/shipments", status_code=201)
-def create_shipment(shipment: Shipment):
+def create_shipment(shipment: Shipment, _session: dict = Depends(auth.require_csrf)):
     return database.create_shipment(
         shipment.recipient,
         shipment.destination,
@@ -91,6 +124,7 @@ def list_shipments(
     order: Literal["asc", "desc"] = "asc",
     limit: Optional[int] = Query(default=None, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    _session: dict = Depends(auth.require_session),
 ):
     response.headers["X-Total-Count"] = str(
         database.count_shipments(q, status)
@@ -108,13 +142,13 @@ def list_shipments(
 
 # Dashboard statistics, computed from SQLite
 @app.get("/stats")
-def get_stats():
+def get_stats(_session: dict = Depends(auth.require_session)):
     return database.get_stats()
 
 
 # Shipment details with its recorded status history
 @app.get("/shipments/{shipment_id}")
-def get_shipment(shipment_id: int):
+def get_shipment(shipment_id: int, _session: dict = Depends(auth.require_session)):
     shipment = database.get_shipment(shipment_id)
 
     if shipment is None:
@@ -131,7 +165,8 @@ def get_shipment(shipment_id: int):
 @app.patch("/shipments/{shipment_id}/status")
 def update_shipment_status(
     shipment_id: int,
-    update: ShipmentStatusUpdate
+    update: ShipmentStatusUpdate,
+    _session: dict = Depends(auth.require_csrf),
 ):
     try:
         shipment = database.update_shipment_status(

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ExternalLink, Info, LayoutDashboard, Menu, Moon, Plus, Boxes, Sun } from 'lucide-react'
+import { ExternalLink, Info, LayoutDashboard, Menu, Moon, Plus, Boxes, Sun, LogOut } from 'lucide-react'
 import { useApp } from '../app-context'
 import { useHealth } from '../lib/hooks'
 import type { Route } from '../lib/router'
@@ -99,7 +99,7 @@ function Sidebar({ route, open }: { route: Route; open: boolean }) {
             <Info className="h-3.5 w-3.5" aria-hidden="true" />
             Démonstration locale
           </p>
-          Données fictives, sans authentification. Ne pas exposer cette application sur Internet.
+          Laboratoire local avec authentification. Ne pas exposer cette application sur Internet.
         </div>
       </div>
     </aside>
@@ -112,12 +112,14 @@ export function Layout({
   navOpen,
   setNavOpen,
   children,
+  onLogout,
 }: {
   route: Route
   title: string
   navOpen: boolean
   setNavOpen: (open: boolean) => void
   children: ReactNode
+  onLogout: () => void
 }) {
   const { openCreate, theme, toggleTheme } = useApp()
 
@@ -170,6 +172,17 @@ export function Layout({
             ) : (
               <Moon className="h-5 w-5" aria-hidden="true" />
             )}
+          </button>
+
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onLogout}
+            title="Déconnexion"
+            aria-label="Se déconnecter"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Déconnexion</span>
           </button>
 
           <button type="button" className="btn-primary" onClick={openCreate}>

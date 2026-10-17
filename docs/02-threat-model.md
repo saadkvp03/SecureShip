@@ -1,6 +1,6 @@
 # SecureShip — Threat Model
 
-> **Status:** Initial architecture and trust-boundary review (STRIDE scenarios pending)
+> **Status:** Initial STRIDE model, augmented with local-lab T-01 authentication remediation. Earlier sections describe the pre-authentication baseline.
 > **Scope:** Local educational laboratory; fictional shipment records; not approved for public production use
 > **Source baseline:** `SecureShip-security-review.zip`, exported from commit `1df1d99`
 > **Working branch:** `feature/security-hardening`
@@ -33,7 +33,7 @@ Do not label a static-analysis finding as exploitable without assessing data pro
 ### 2.2 Outside current scope / not implemented
 
 - Internet-facing production deployment, TLS termination, domain configuration, and cloud hosting.
-- Authentication, user accounts, authorization roles, and tenant separation. These **do not exist in the reviewed API**; access cannot be treated as access-controlled.
+- Multi-user identity management, authorization roles, and tenant separation. A **single local operator session** was introduced after the initial baseline for T-01 (see `docs/06-authentication.md`).
 - Real customer information, production credentials, payment processing, and integrations with external logistics services.
 - Active Terraform infrastructure: `infra/terraform/` currently contains only `.gitkeep`.
 
@@ -194,7 +194,18 @@ Treatment:
 - Require authentication and authorization before
   any public or multi-user deployment.
 
-Status: Behavior confirmed; remediation deferred.
+Status: Remediated for the single-operator LOCAL lab in the authentication update.
+
+Post-remediation controls (see `docs/06-authentication.md`):
+- API shipment reads/updates and statistics now require an authenticated session.
+- Writes require an anti-CSRF token, including logout.
+- Stored password is a salted scrypt hash; opaque sessions are revocable in SQLite.
+- Existing shipment data are migrated non-destructively.
+- Tests: HTTP 401 without a cookie; HTTP 403 when CSRF is absent or invalid;
+  an authenticated operator can use existing shipment workflows.
+- This is NOT production IAM: no roles, MFA, IP-based rate limiting, TLS, or multi-user isolation.
+- Original T-01 evidence screenshots document the **pre-fix** state.
+
 
 
 ### STRIDE T-02 — Shipment status transition integrity

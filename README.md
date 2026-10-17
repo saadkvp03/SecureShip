@@ -34,14 +34,17 @@ The project simulates a fictional logistics company that manages shipments. It i
 - **Create a shipment:** validated form (recipient, destination, optional origin and notes). A readable tracking reference such as `SS-7K4Q9M` is generated.
 - **Shipment details:** information, tracker (created → in transit → delivered) and the real history of status changes with timestamps.
 - Light and dark themes, responsive layout (desktop, tablet, phone), toast notifications, loading and error states, keyboard-accessible controls.
-- The interface is in French. It has **no authentication** and is meant for local demonstration.
+- The interface is in French. A **single local operator login** now protects the shipment API. It remains a local-only security laboratory, not a production application.
 
 ### API endpoints
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Application information (JSON, unchanged) |
-| `GET` | `/health` | Check application availability |
+| `GET` | `/health` | Check application availability (public) |
+| `POST` | `/auth/login` | Local operator login; sets HttpOnly session cookie |
+| `GET` | `/auth/me` | Check current session and obtain anti-CSRF token |
+| `POST` | `/auth/logout` | Revoke current session (requires CSRF token) |
 | `POST` | `/shipments` | Create a shipment |
 | `GET` | `/shipments` | List shipments (optional search, filter, sort, pagination) |
 | `GET` | `/shipments/{shipment_id}` | Shipment details with status history |
@@ -73,9 +76,24 @@ Statuses: `created`, `in_transit`, `delivered`.
 }
 ```
 
+### Authentication (local security lab)
+
+- One operator configured **on the local machine only**; no registration, user database, or public hosting.
+- Password stored only as a salted **scrypt hash** in `.env` (the plain password is never stored).
+- Cryptographically random, opaque session cookie with `HttpOnly` and `SameSite=Strict`;
+  its SHA-256 digest and expiration are stored in the existing SQLite database.
+- HTTP APIs `/shipments`, `/shipments/{id}`, `/shipments/{id}/status` and `/stats` require a valid session.
+  HTTP POST/PATCH/`/auth/logout` also require a valid `X-CSRF-Token` header.
+- Public: `/`, `/health`, `/docs`, static `/app` login shell (data APIs remain protected).
+- The cookie uses `Secure=False` solely because this lab is hosted on `127.0.0.1` over HTTP.
+  Never reuse this configuration on the public Internet: a hosted application would need HTTPS,
+  `Secure` cookies, brute-force throttling, a full IAM/privacy review, and additional hardening.
+- **Important:** this changes the original unauthenticated API contract; old anonymous
+  curl requests now deliberately return HTTP 401.
+
 ### Database
 
-SQLite with two tables: `shipments` and `shipment_events` (the status history). Older databases are upgraded automatically and non-destructively at startup: new columns are added, existing rows are kept and receive a tracking reference. For shipments created before this upgrade, the creation date and history were never recorded, so they stay empty instead of being invented. All SQL values are bound parameters.
+SQLite with shipment tables `shipments` and `shipment_events` (the status history), plus a small `auth_sessions` table for login sessions. Older databases are upgraded automatically and non-destructively at startup: new columns are added, existing rows are kept and receive a tracking reference. For shipments created before this upgrade, the creation date and history were never recorded, so they stay empty instead of being invented. All SQL values are bound parameters.
 
 ## 4. Technology Stack
 
@@ -103,6 +121,7 @@ SecureShip/
 ├── .github/
 │   └── workflows/ci.yml    # Pytest, frontend build, Docker build + smoke test
 ├── app/
+│   ├── auth.py             # Scrypt, revocable server sessions, CSRF
 │   ├── main.py             # FastAPI routes, models, serves the interface at /app
 │   └── database.py         # SQLite schema, migration and queries
 ├── frontend/               # React + TypeScript + Vite + Tailwind interface
@@ -115,8 +134,10 @@ SecureShip/
 ├── infra/
 │   └── terraform/          # Infrastructure as Code (planned)
 ├── scripts/
+│   ├── setup_auth.py       # Interactive secret-free-in-Git setup
 │   └── seed_demo.py        # Optional fictional demo data (separate database)
 ├── tests/
+│   ├── test_auth.py        # Authentication security regressions
 │   ├── test_main.py        # Original 9 API tests
 │   ├── test_features.py    # Tests for the new features
 │   └── conftest.py
@@ -138,6 +159,7 @@ One-time setup, from the project directory:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python scripts/setup_auth.py   # interactive; choose YOUR OWN login + strong password
 cd frontend && npm install && cd ..
 ```
 
@@ -147,7 +169,7 @@ Terminal 1 — API with auto-reload on http://127.0.0.1:8000:
 
 ```bash
 source .venv/bin/activate
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --env-file .env
 ```
 
 Terminal 2 — interface with hot reload:
@@ -163,7 +185,7 @@ Open **http://localhost:5173/app/**. Vite forwards `/shipments`, `/stats` and `/
 
 ```bash
 cd frontend && npm install && npm run build && cd ..
-python -m uvicorn app.main:app
+python -m uvicorn app.main:app --env-file .env
 ```
 
 Open:
@@ -174,7 +196,7 @@ Open:
 
 If the interface has not been built, `/app` shows an explanatory page (HTTP 503) and the API keeps working.
 
-The SQLite database is created automatically at `secureship.db` by default. Its location can be changed using the `SECURESHIP_DB_PATH` environment variable.
+The SQLite database is created automatically at `secureship.db` by default. Credentials live in the ignored `.env` file created by `scripts/setup_auth.py`; never commit or share that file. Its location can be changed using the `SECURESHIP_DB_PATH` environment variable.
 
 ### Optional demo data
 
@@ -182,7 +204,7 @@ To try the interface with ten fictional shipments **without touching your real d
 
 ```bash
 python scripts/seed_demo.py                       # writes ./demo.db
-SECURESHIP_DB_PATH=demo.db python -m uvicorn app.main:app --reload
+SECURESHIP_DB_PATH=demo.db python -m uvicorn app.main:app --reload --env-file .env
 ```
 
 The script refuses to write to `secureship.db` or to any database that already contains shipments.
@@ -195,7 +217,7 @@ With the virtual environment activated:
 python -m pytest -q
 ```
 
-The suite contains the original 9 tests (`tests/test_main.py`) plus tests for details, history, tracking references, search, filters, sorting, pagination, statistics, the upgrade of a legacy database, and the `/app` route. Each test uses its own temporary database.
+The suite includes authentication regressions in `tests/test_auth.py` as well as the original 9 tests (`tests/test_main.py`) plus tests for details, history, tracking references, search, filters, sorting, pagination, statistics, the upgrade of a legacy database, and the `/app` route. Each test uses its own temporary database.
 
 Frontend checks:
 
@@ -208,6 +230,15 @@ npm run build       # TypeScript + production build into frontend/dist
 ## 8. Run with Docker
 
 **Requirement:** Docker installed and running (Apple Silicon is supported; the images are multi-architecture).
+
+First configure the account in the repository root (**once**):
+
+```bash
+python scripts/setup_auth.py
+```
+
+The generated `.env` is ignored by Git. Compose loads it automatically.
+**Do not remove the existing named volume, or your shipments will be lost.**
 
 Everything on one port with a persistent volume:
 
@@ -245,7 +276,8 @@ The Dockerfile builds the interface in a Node stage, then copies only the compil
 - [x] Initialize Git and publish the repository on GitHub.
 - [x] Automate tests with GitHub Actions.
 - [x] Build a web interface on top of the API.
-- [ ] Introduce Semgrep, Trivy, Gitleaks, and Checkov checks.
+- [x] Introduce Semgrep OSS reporting in CI.
+- [ ] Add Trivy, Gitleaks and Checkov checks, plus a blocking policy for relevant findings.
 - [ ] Document controlled security findings and remediation.
 - [ ] Validate expected pipeline failures and successful fixes.
 - [ ] Finalize technical and security reporting.
@@ -259,15 +291,16 @@ The `docs/` directory contains:
 - `03-security-findings.md` — security findings (to be completed).
 - `04-remediation-validation.md` — remediation and validation evidence (to be completed).
 - `05-final-report.md` — final project report (to be completed).
+- `06-authentication.md` — local login/session design, T-01 remediation and security evidence plan.
 
 ## 11. Limitations & Security Notes
 
 - This is an educational project using fictional shipment data.
-- The API and the interface have **no authentication or authorization**; they must not be exposed as a production service. Docker Compose and the examples bind to `127.0.0.1` on purpose.
-- Any status can be set from any other status (the original API behavior is kept); the history records every real change.
+- A single-operator login now gates the shipment API. This is **not a full multi-user IAM system** and is still unsuitable for production. Docker Compose binds to `127.0.0.1` on purpose.
+- Status transitions are restricted to `created → in_transit → delivered`; invalid transitions are rejected with HTTP 409 and history is preserved.
 - Search ignores case and accents using SQLite and Python; it is a simple scan, adequate for a demo-sized database.
 - No production environment or real customer data is used.
-- Security scanning tools (Semgrep, Trivy, Gitleaks, Checkov) have **not yet been implemented**.
+- Semgrep is already configured in GitHub Actions (reporting mode); Trivy, Gitleaks and Checkov are pending. The Semgrep CI gate is not yet blocking on findings.
 - Deliberately vulnerable scenarios, if introduced later, will be limited to controlled laboratory work.
 - Local databases, Python environments, `node_modules`, and secrets must not be committed to the repository.
 
@@ -280,3 +313,22 @@ The `docs/` directory contains:
 ---
 
 *SecureShip is developed as an educational cybersecurity engineering and DevSecOps portfolio project.*
+
+
+## Authentication security verification (local lab)
+
+From `~/Desktop/SecureShip`, after `docker compose up -d --build`:
+
+1. Open <http://127.0.0.1:8000/app>, verify the login form is shown.
+2. Log in with the username/password chosen during `scripts/setup_auth.py`.
+3. Existing shipments must still be present; create a fictional test shipment.
+4. Click **Déconnexion** and confirm you can no longer see the shipments.
+5. Run `curl -i http://127.0.0.1:8000/shipments`: **HTTP 401** is expected.
+6. Run `python -m pytest -q` locally: the code snapshot passed **52 backend tests** during preparation; rerun on your machine.
+
+Screenshots for the portfolio (redact sensitive content):
+`docs/evidence/t01-login-form.png`, `docs/evidence/t01-unauthenticated-401.png`,
+`docs/evidence/t01-authenticated-access.png`. Never photograph your real password,
+`.env`, cookie values, CSRF token, or credentials.
+
+See `docs/06-authentication.md` for security design and limitations.

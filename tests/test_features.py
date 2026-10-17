@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import database, main
 from app.main import app
+from conftest import login_test_client
 
 TRACKING_PATTERN = re.compile(r"^SS-[A-HJ-NP-Z2-9]{6}$")
 
@@ -321,6 +322,7 @@ def test_legacy_database_is_upgraded_without_data_loss(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", legacy)
 
     with TestClient(app) as client:
+        login_test_client(client)
         shipments = client.get("/shipments").json()
         assert len(shipments) == 1
         assert shipments[0]["recipient"] == "Old Client"

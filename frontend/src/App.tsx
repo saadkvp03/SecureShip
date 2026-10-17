@@ -6,6 +6,8 @@ import { Toasts, type ToastItem } from './components/Toasts'
 import { EmptyState } from './components/ui'
 import { useRoute } from './lib/router'
 import Dashboard from './pages/Dashboard'
+import LoginPage from './components/LoginPage'
+import { getSession, logout, type AuthInfo } from './lib/api'
 import Detail from './pages/Detail'
 import Shipments from './pages/Shipments'
 
@@ -18,6 +20,25 @@ const TITLES = {
 
 export default function App() {
   const route = useRoute()
+  const [session, setSession] = useState<AuthInfo | null | undefined>(undefined)
+
+  useEffect(() => {
+    let active = true
+    getSession().then(
+      (info) => { if (active) setSession(info) },
+      () => { if (active) setSession(null) },
+    )
+    const expired = () => setSession(null)
+    window.addEventListener('secureship-auth-expired', expired)
+    return () => {
+      active = false
+      window.removeEventListener('secureship-auth-expired', expired)
+    }
+  }, [])
+
+  const signOut = useCallback(async () => {
+    try { await logout() } finally { setSession(null) }
+  }, [])
   const [theme, setTheme] = useState<Theme>(() =>
     document.documentElement.classList.contains('dark') ? 'dark' : 'light',
   )
@@ -88,9 +109,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen])
 
+  if (session === undefined) {
+    return <div className="grid min-h-screen place-items-center text-muted">Vérification de la session…</div>
+  }
+  if (session === null) {
+    return <LoginPage onLogin={setSession} />
+  }
+
   return (
     <AppContext.Provider value={context}>
-      <Layout route={route} title={TITLES[route.name]} navOpen={navOpen} setNavOpen={setNavOpen}>
+      <Layout route={route} title={TITLES[route.name]} navOpen={navOpen} setNavOpen={setNavOpen} onLogout={() => { void signOut() }}>
         {route.name === 'dashboard' && <Dashboard />}
         {route.name === 'shipments' && <Shipments route={route} />}
         {route.name === 'detail' && <Detail id={route.id} />}

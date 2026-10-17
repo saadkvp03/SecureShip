@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - feature/modern-ui-15october
+      - "feature/**"
   pull_request:
     branches:
       - main
@@ -67,19 +67,37 @@ jobs:
       - name: Build image
         run: docker build -t secureship:ci .
 
-      - name: Smoke test the container
+      - name: Smoke test authentication and shipments
         run: |
-          docker run -d --name secureship-ci -p 8000:8000 secureship:ci
+          # Generate throwaway CI-only credentials, never real user secrets.
+          printf 'SECURESHIP_AUTH_USER=ci-operator\n' > /tmp/secureship-ci.env
+          printf 'SECURESHIP_AUTH_PASSWORD_HASH=' >> /tmp/secureship-ci.env
+          docker run --rm --entrypoint python secureship:ci -c \
+            'from app.auth import hash_password; print(hash_password("ci-test-password-long"))' \
+            >> /tmp/secureship-ci.env
+          docker run -d --name secureship-ci -p 127.0.0.1:8000:8000 \
+            --env-file /tmp/secureship-ci.env secureship:ci
           for i in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8000/health && break
             sleep 1
           done
           curl -fsS http://127.0.0.1:8000/health
           curl -fsS http://127.0.0.1:8000/app/ | grep -q 'id="root"'
-          curl -fsS -X POST http://127.0.0.1:8000/shipments \
+          # Anonymous users may not access shipments.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/shipments)" = 401
+          curl -fsS -c /tmp/secureship-ci-cookies -X POST \
+            http://127.0.0.1:8000/auth/login \
             -H 'Content-Type: application/json' \
+            -d '{"username":"ci-operator","password":"ci-test-password-long"}' \
+            > /tmp/secureship-ci-login.json
+          csrf=$(python -c 'import json; print(json.load(open("/tmp/secureship-ci-login.json"))["csrf_token"])')
+          curl -fsS -b /tmp/secureship-ci-cookies -X POST \
+            http://127.0.0.1:8000/shipments \
+            -H 'Content-Type: application/json' \
+            -H "X-CSRF-Token: $csrf" \
             -d '{"recipient":"CI","destination":"Rabat"}'
-          curl -fsS http://127.0.0.1:8000/stats
+          curl -fsS -b /tmp/secureship-ci-cookies http://127.0.0.1:8000/stats
+          rm -f /tmp/secureship-ci.env /tmp/secureship-ci-cookies /tmp/secureship-ci-login.json
 
       - name: Show container logs on failure
         if: failure()
