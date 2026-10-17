@@ -119,4 +119,4 @@ jobs:
         run: python -m pip install semgrep==1.180.0
 
       - name: Scan backend and frontend
-        run: semgrep scan --config auto app/ frontend/src/
+        run: semgrep scan --config auto --error app/ frontend/src/

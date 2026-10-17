@@ -135,6 +135,9 @@ def init_database():
 
         for name, column_type in _ADDED_COLUMNS.items():
             if name not in existing:
+                # Reviewed: identifiers come from the fixed _ADDED_COLUMNS whitelist.
+                # See docs/07-semgrep-triage.md for the security justification.
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 connection.execute(
                     f"ALTER TABLE shipments ADD COLUMN {name} {column_type}"
                 )
@@ -295,6 +298,10 @@ def count_shipments(search=None, status=None):
     where, params = _build_filters(search, status)
 
     with _connect() as connection:
+        # Reviewed: WHERE uses fixed SQL fragments from _build_filters().
+        # User-controlled values are passed as bound SQLite parameters.
+        # See docs/07-semgrep-triage.md for the security justification.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         row = connection.execute(
             f"SELECT COUNT(*) AS total FROM shipments {where}",
             params,
