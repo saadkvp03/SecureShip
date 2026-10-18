@@ -2,13 +2,21 @@
 
 ### Automated Application Security & DevSecOps Pipeline
 
+[![SecureShip CI](https://github.com/saadkvp03/SecureShip/actions/workflows/ci.yml/badge.svg)](https://github.com/saadkvp03/SecureShip/actions/workflows/ci.yml)
+
+**A local-only application security and DevSecOps laboratory** combining a real FastAPI + React shipment application with authentication, Docker hardening, and automated security gates.
+
+![SecureShip DevSecOps workflow](docs/assets/devsecops-workflow.png)
+
+*Workflow diagram: the `docker` job depends on `test` and `frontend`; Semgrep, Gitleaks, SCA and Checkov run as independent jobs. Actionlint is currently a local check, not a GitHub Actions job.*
+
 ## 1. Project Overview
 
 SecureShip is a hands-on cybersecurity and DevSecOps portfolio project focused on building a small application and progressively securing its software delivery lifecycle.
 
-The project simulates a fictional logistics company that manages shipments. It is made of a REST API (FastAPI + SQLite) and a modern web interface (React + TypeScript), which together serve as a practical target for functional testing, containerization, and future automated security checks.
+The project simulates a fictional logistics company that manages shipments. It is made of a REST API (FastAPI + SQLite) and a modern web interface (React + TypeScript), which together serve as a practical target for functional testing, containerization, threat modeling, and automated security checks.
 
-**Project status:** In development. The API, the web interface, SQLite persistence, automated tests, Docker packaging, and a GitHub Actions CI pipeline are implemented. Security scanning tools are the next phase.
+**Project status (October 2026):** The application and its initial security-hardening phase are implemented. GitHub Actions runs seven jobs covering application tests, frontend compilation, Docker smoke tests, Semgrep, Trivy, Gitleaks, dependency audits, and Checkov. Pull Request [#2](https://github.com/saadkvp03/SecureShip/pull/2) was merged after all 14 PR checks passed. DAST with OWASP ZAP remains future work.
 
 > **Scope:** Educational laboratory using fictional data. This is not a production-ready logistics platform.
 
@@ -99,27 +107,26 @@ SQLite with shipment tables `shipments` and `shipment_events` (the status histor
 
 **Implemented:**
 
-- Python 3.11, FastAPI, Pydantic
-- SQLite
-- React 18, TypeScript, Vite, Tailwind CSS, Lucide icons (no charting library: the chart is plain SVG)
-- Pytest and FastAPI TestClient
-- Docker (multi-stage build) and Docker Compose
-- GitHub Actions (tests, frontend build, Docker build and smoke test)
+- **Backend:** Python 3.11, FastAPI, Pydantic, SQLite.
+- **Frontend:** React 18, TypeScript, Vite 5, Tailwind CSS, Lucide icons; the dashboard chart uses plain SVG.
+- **Testing:** Pytest, FastAPI TestClient, TypeScript type checks, Vite production build, Docker authentication and shipment smoke tests.
+- **Packaging:** multi-stage Docker build, Docker Compose, non-root runtime (UID 10001), persistent SQLite volume.
+- **CI:** GitHub Actions with seven jobs and blocking security gates.
+- **SAST:** Semgrep OSS (`--error`) with documented triage of reviewed findings.
+- **Container vulnerability analysis:** Trivy full JSON report and a gate for fixable HIGH/CRITICAL issues.
+- **SCA:** `pip-audit` for Python dependencies; `npm audit --omit=dev` for frontend production dependencies.
+- **Secret scanning:** Gitleaks against Git history.
+- **Configuration scanning:** Checkov for Dockerfile and GitHub Actions workflows.
+- **Local CI linting:** Actionlint with ShellCheck (not yet automated in CI).
 
-**Planned:**
-
-- Semgrep — static application security testing (SAST)
-- Trivy — dependency and container image scanning
-- Gitleaks — secret detection
-- Checkov — Infrastructure as Code scanning
-- Terraform — example infrastructure configurations
+**Next / not implemented:** OWASP ZAP DAST, optional additional IaC/Terraform lab exercises, and completion of the final security report. **No cloud infrastructure is deployed.**
 
 ## 5. Project Structure
 
 ```text
 SecureShip/
 ├── .github/
-│   └── workflows/ci.yml    # Pytest, frontend build, Docker build + smoke test
+│   └── workflows/ci.yml    # 7 jobs: tests, build, Docker/Trivy, SAST, secrets, SCA, IaC
 ├── app/
 │   ├── auth.py             # Scrypt, revocable server sessions, CSRF
 │   ├── main.py             # FastAPI routes, models, serves the interface at /app
@@ -130,7 +137,8 @@ SecureShip/
 │   │   ├── components/     # Layout, dialog, tracker rail, chart, toasts…
 │   │   └── lib/            # API client, router, hooks, formatting
 │   └── package.json
-├── docs/                   # Project and security documentation
+├── docs/                   # Threat model, triage and security documentation
+│   └── assets/             # DevSecOps workflow diagram (add supplied PNG here)
 ├── infra/
 │   └── terraform/          # Infrastructure as Code (planned)
 ├── scripts/
@@ -140,14 +148,16 @@ SecureShip/
 │   ├── test_auth.py        # Authentication security regressions
 │   ├── test_main.py        # Original 9 API tests
 │   ├── test_features.py    # Tests for the new features
+│   └── test_sql_regression.py # SQL injection regression tests
 │   └── conftest.py
-├── Dockerfile              # Multi-stage: builds the interface, runs the API
+├── Dockerfile              # Multi-stage, minimum runtime deps, non-root user
 ├── docker-compose.yml
 ├── Makefile                # Shortcuts for the commands below
-└── requirements.txt
+├── requirements-runtime.txt # Production-only requirements constrained by requirements.txt
+└── requirements.txt        # Pinned dependency inventory for local development/tests
 ```
 
-`.venv/`, `node_modules/`, `frontend/dist/`, `.pytest_cache/` and every `*.db` file are excluded from Git.
+`.env`, `.venv/`, `node_modules/`, `frontend/dist/`, `.pytest_cache/` and local `*.db` files are excluded from Git. Keep scan JSON outputs, screenshots and other evidence outside the repository unless explicitly curated and redacted.
 
 ## 6. Run Locally
 
@@ -256,6 +266,7 @@ docker build -t secureship:dev .
 docker run -d --rm \
   --name secureship-dev \
   -p 127.0.0.1:8000:8000 \
+  --env-file .env \
   -v secureship-data:/app/data \
   secureship:dev
 
@@ -263,72 +274,114 @@ curl http://127.0.0.1:8000/health      # {"status":"ok"}
 docker stop secureship-dev
 ```
 
-The Dockerfile builds the interface in a Node stage, then copies only the compiled files into the Python image. The container runs as a non-root user (uid 10001) and has a health check. The `secureship-data` volume stores SQLite data separately from the container.
+The Dockerfile builds the interface in a Node stage, then copies only the compiled files into the Python image. The Python stage installs `requirements-runtime.txt` (constrained by the pinned `requirements.txt`), removes unnecessary packaging tools after installation, and applies the available Debian security update for `liblzma5`. The container runs as a non-root user (UID 10001) and has a health check. The `secureship-data` volume stores SQLite data separately from the container.
 
-## 9. DevSecOps & Security Roadmap
+## 9. DevSecOps CI Workflow
 
-- [x] Define project scope and architecture.
-- [x] Implement the FastAPI shipment management API.
-- [x] Add SQLite persistence.
-- [x] Create and run automated tests.
-- [x] Containerize the application with Docker.
-- [x] Verify non-root execution and persistent Docker volume behavior.
-- [x] Initialize Git and publish the repository on GitHub.
-- [x] Automate tests with GitHub Actions.
-- [x] Build a web interface on top of the API.
-- [x] Introduce Semgrep OSS reporting in CI.
-- [ ] Add Trivy, Gitleaks and Checkov checks, plus a blocking policy for relevant findings.
-- [ ] Document controlled security findings and remediation.
-- [ ] Validate expected pipeline failures and successful fixes.
-- [ ] Finalize technical and security reporting.
+GitHub Actions uses [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The workflow runs on pushes to `main` and `feature/**`, and on pull requests targeting `main`. It validates changes; **it does not deploy the application**.
 
-## 10. Documentation
+The job graph is illustrated in the workflow diagram at the top of this README.
 
-The `docs/` directory contains:
+| Job | Purpose | Gate / outputs |
+| --- | --- | --- |
+| `test` | Install Python dependencies and run Pytest. | Fails on test failures. |
+| `frontend` | TypeScript checks and Vite production build. | Fails on build errors. |
+| `docker` | Build `secureship:ci`; smoke-test health, login, access control, CSRF-protected shipment creation and stats; run Trivy. | **Depends on `test` and `frontend`.** Uploads `trivy-report.json` (14-day retention). Blocks fixable HIGH/CRITICAL Trivy vulnerabilities. |
+| `semgrep` | `semgrep scan --config auto --error app/ frontend/src/`. | Fails on remaining reported findings, subject to reviewed in-code suppressions. |
+| `gitleaks` | Scan Git history using Gitleaks Action v3 with full-history checkout. | Fails on detected leaks; automatic comments and artifact upload disabled. |
+| `sca` | `pip-audit -r requirements.txt` plus `npm --prefix frontend audit --omit=dev`. | Fails on reported dependency vulnerabilities in the scopes scanned. |
+| `checkov` | Scan `Dockerfile` and `.github/workflows` using Checkov 3.3.20. | Fails on Checkov policy violations. |
 
-- `01-scope-architecture.md` — project scope and planned architecture.
-- `02-threat-model.md` — identified threats and proposed security controls.
-- `03-security-findings.md` — security findings (to be completed).
-- `04-remediation-validation.md` — remediation and validation evidence (to be completed).
-- `05-final-report.md` — final project report (to be completed).
-- `06-authentication.md` — local login/session design, T-01 remediation and security evidence plan.
+The `semgrep`, `gitleaks`, `sca` and `checkov` jobs are independent of the Docker job and can run concurrently. **The Trivy report is not a clean bill of health**: the gate intentionally excludes issues for which Trivy reports no available fix. Review the complete JSON artifact for residual vulnerabilities.
 
-## 11. Limitations & Security Notes
+**Local-only workflow lint:** `actionlint .github/workflows/ci.yml` checks GitHub Actions expressions and shell scripts via ShellCheck. It caught an unused loop-variable warning (`SC2034`), which was corrected before merging PR #2. Actionlint is **not** a separate GitHub Actions job in the current configuration.
 
-- This is an educational project using fictional shipment data.
-- A single-operator login now gates the shipment API. This is **not a full multi-user IAM system** and is still unsuitable for production. Docker Compose binds to `127.0.0.1` on purpose.
-- Status transitions are restricted to `created → in_transit → delivered`; invalid transitions are rejected with HTTP 409 and history is preserved.
-- Search ignores case and accents using SQLite and Python; it is a simple scan, adequate for a demo-sized database.
-- No production environment or real customer data is used.
-- Semgrep is already configured in GitHub Actions (reporting mode); Trivy, Gitleaks and Checkov are pending. The Semgrep CI gate is not yet blocking on findings.
-- Deliberately vulnerable scenarios, if introduced later, will be limited to controlled laboratory work.
-- Local databases, Python environments, `node_modules`, and secrets must not be committed to the repository.
+### Validated baseline (18 October 2026)
 
-## 12. Project Status
+| Validation | Observed result |
+| --- | --- |
+| Local Pytest suite | **53 / 53 passed** |
+| React / TypeScript / Vite | Production build passed |
+| Docker | Image build and security smoke tests passed in CI |
+| Trivy fixable HIGH/CRITICAL gate | Passed on `secureship:ci` |
+| Gitleaks | No leaks detected in SecureShip Git history |
+| Checkov (Dockerfile) | 9 passed, 0 failed (local scan) |
+| Checkov (GitHub Actions) | 159 passed, 0 failed (local scan) |
+| Actionlint + ShellCheck | No reported errors after correction (local run) |
+| Pull Request [#2](https://github.com/saadkvp03/SecureShip/pull/2) | **14 successful PR checks; merged** |
 
-**Current phase:** Application complete (API + interface); preparing the security tooling phase.
+Live CI results: [SecureShip GitHub Actions](https://github.com/saadkvp03/SecureShip/actions). This table records one validated baseline; results can change when dependencies, images, tooling or rules are updated.
 
-**Next:** Add the DevSecOps scanning steps to the GitHub Actions pipeline, one tool at a time.
+## 10. Security Findings & Risk Treatment
+
+- **Semgrep:** reviewed three SQL-construction findings. The relevant SQL identifiers/fragments come from trusted code, and dynamic values are passed as bound parameters. Narrow suppressions were accompanied by a SQL injection regression test; see [`docs/07-semgrep-triage.md`](docs/07-semgrep-triage.md). This does not establish that every SQL statement is safe.
+- **Trivy:** reduced the image inventory from 175 initial findings to 164 after removing unnecessary runtime packaging tools and patching `liblzma5` (October 2026 local baseline). The remaining findings included HIGH-severity Debian advisories with no identified fix at scan time; there were no reported CRITICAL findings. The **blocking gate** returned no eligible fixable HIGH/CRITICAL findings. This is risk tracking, **not a claim of zero vulnerabilities**.
+- **SCA:** `pip-audit` found no known vulnerabilities in the Python requirements during local validation; `npm audit --omit=dev` found none in the production frontend dependency scope. The broader npm audit still reported issues affecting development/build tooling, retained for future triage.
+- **Gitleaks:** the SecureShip repository history scan found no leaks. A separate disposable local Git repository was used to verify that a synthetic token remains detectable in history after removal from the latest file version. No real token was used or committed to SecureShip.
+- **Checkov:** the Dockerfile and CI workflow checks passed in the recorded scans. These static policies cover specific classes of misconfiguration and do not guarantee production readiness.
+
+For this **localhost-only educational environment**, residual risks are documented and reviewed rather than masked with blanket suppressions or potentially destabilizing dependency upgrades. Reassess all findings before any change of scope or exposure.
+
+## 11. DevSecOps & Security Roadmap
+
+- [x] Define the scope and architecture; implement FastAPI, SQLite and the React interface.
+- [x] Add authenticated operator sessions, CSRF protection and server-enforced shipment state transitions.
+- [x] Build automated API/security regressions; 53 tests passed on the validated baseline.
+- [x] Build the multi-stage Docker image and verify non-root runtime and persistent volume behavior.
+- [x] Publish the repository and integrate automated checks in GitHub Actions.
+- [x] Triage Semgrep findings and enable the blocking SAST gate.
+- [x] Implement Trivy reporting and a blocking gate for **fixable** HIGH/CRITICAL issues.
+- [x] Integrate Gitleaks, Python/npm SCA and Checkov into CI.
+- [x] Validate the GitHub Actions workflow locally with Actionlint + ShellCheck.
+- [x] Merge security-hardening Pull Request [#2](https://github.com/saadkvp03/SecureShip/pull/2) after successful checks.
+- [ ] Complete remaining detailed security findings, remediation evidence and final report.
+- [ ] Perform a separately scoped OWASP ZAP DAST assessment against the authorized local application.
+- [ ] Consider adding Actionlint to CI and improving dependency/tool version pinning and reporting.
+
+## 12. Documentation
+
+The `docs/` directory includes the following project documentation (some reports are still in progress):
+
+- [`01-scope-architecture.md`](docs/01-scope-architecture.md) — project scope and architecture.
+- [`02-threat-model.md`](docs/02-threat-model.md) — threats and security controls.
+- [`03-security-findings.md`](docs/03-security-findings.md) — security findings / in-progress reporting.
+- [`04-remediation-validation.md`](docs/04-remediation-validation.md) — remediation and validation / in-progress reporting.
+- [`05-final-report.md`](docs/05-final-report.md) — final report / in-progress reporting.
+- [`06-authentication.md`](docs/06-authentication.md) — session, login, CSRF design and local evidence plan.
+- [`07-semgrep-triage.md`](docs/07-semgrep-triage.md) — Semgrep findings and false-positive analysis.
+- `assets/devsecops-workflow.png` — CI architecture diagram **supplied with this README update** (must be placed under `docs/assets/`).
+
+Security evidence such as scanner JSON reports or terminal screenshots is kept outside Git by default. Only intentionally selected, redacted evidence should be published.
+
+## 13. Limitations & Security Notes
+
+- **Local-only scope:** no public deployment and no real shipment/customer data; Docker Compose binds `127.0.0.1` intentionally. Passing CI does **not** make this production-ready.
+- **Authentication:** the application has a single operator and is not a full IAM solution. Local HTTP requires `Secure=False` cookies; a public deployment would require HTTPS, `Secure` cookies, rate limiting, privacy/IAM review, and other controls.
+- **Shipment rules:** `created → in_transit → delivered` transitions are server-enforced. Invalid transitions return HTTP 409 and history is retained.
+- **SQLite:** adequate for this lab, but not a general scalability or multi-user security architecture. Accent/case-insensitive search is designed for a small demo database.
+- **Residual vulnerabilities:** Trivy's `--ignore-unfixed` gate excludes issues without available fixes, while the full report still lists them. npm development dependencies also have findings not included in the production-only SCA gate.
+- **Static/automated test coverage:** Semgrep, Gitleaks, Checkov and dependency scanners detect selected classes of issues; they do not replace code review, penetration testing, threat modeling or ongoing patch management.
+- **Secrets and state:** `.env`, cookies, session data, `*.db`, dependency directories and Docker volumes are private local state. Never commit credentials or screenshots that reveal them. **Do not run `docker compose down -v` on a volume containing valuable data.**
+
+## 14. Project Status
+
+**Current phase:** Initial application-security and DevSecOps CI hardening **completed and merged** into `main` via [PR #2](https://github.com/saadkvp03/SecureShip/pull/2).
+
+**Next technical phase:** plan authorized **OWASP ZAP DAST** against the local application as a separate piece of work, followed by findings triage and evidence. Complete the remaining security documentation as results become available.
 
 ---
 
-*SecureShip is developed as an educational cybersecurity engineering and DevSecOps portfolio project.*
+*SecureShip is a hands-on, local-only cybersecurity engineering and DevSecOps portfolio project. It is not a production logistics platform.*
 
+## 15. Authentication Security Verification (Local Lab)
 
-## Authentication security verification (local lab)
+From the SecureShip project directory, after `docker compose up -d --build`:
 
-From `~/Desktop/SecureShip`, after `docker compose up -d --build`:
+1. Open <http://127.0.0.1:8000/app> and verify the login form is shown.
+2. Log in with the **locally chosen** username/password from `scripts/setup_auth.py`.
+3. Verify access to existing shipments and create a fictional test shipment.
+4. Click **Déconnexion** and confirm protected data cannot be retrieved without a session.
+5. Run `curl -i http://127.0.0.1:8000/shipments`: **HTTP 401** is expected without authentication.
+6. Run `python -m pytest -q`: the validated October 2026 snapshot passed **53 tests**.
 
-1. Open <http://127.0.0.1:8000/app>, verify the login form is shown.
-2. Log in with the username/password chosen during `scripts/setup_auth.py`.
-3. Existing shipments must still be present; create a fictional test shipment.
-4. Click **Déconnexion** and confirm you can no longer see the shipments.
-5. Run `curl -i http://127.0.0.1:8000/shipments`: **HTTP 401** is expected.
-6. Run `python -m pytest -q` locally: the code snapshot passed **52 backend tests** during preparation; rerun on your machine.
-
-Screenshots for the portfolio (redact sensitive content):
-`docs/evidence/t01-login-form.png`, `docs/evidence/t01-unauthenticated-401.png`,
-`docs/evidence/t01-authenticated-access.png`. Never photograph your real password,
-`.env`, cookie values, CSRF token, or credentials.
-
-See `docs/06-authentication.md` for security design and limitations.
+Keep portfolio screenshots on your local machine unless you intentionally publish sanitized copies. Never capture or publish your actual password, `.env`, cookies, CSRF tokens or other credentials. See [`docs/06-authentication.md`](docs/06-authentication.md) for the security design.
