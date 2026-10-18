@@ -16,6 +16,10 @@ RUN npm run build
 
 # 1. Base Python image
 FROM python:3.11-slim
+# Apply available Debian security updates for liblzma5.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade liblzma5 \
+    && rm -rf /var/lib/apt/lists/*
 
 # 2. Set the working directory
 WORKDIR /app
@@ -24,11 +28,13 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 4. Copy dependencies
-COPY requirements.txt .
+# 4. Copy dependency manifests
+COPY requirements.txt requirements-runtime.txt ./
 
-# 5. Install Python packages
-RUN pip install --no-cache-dir -r requirements.txt
+# 5. Install runtime dependencies only
+# Install runtime dependencies, then remove packaging tools.
+RUN python -m pip install --no-cache-dir -r requirements-runtime.txt \
+    && python -m pip uninstall -y pip setuptools wheel
 
 # 6. Copy application code and the built interface (served at /app)
 COPY app/ ./app/

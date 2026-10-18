@@ -3,17 +3,18 @@ from fastapi.testclient import TestClient
 
 from app import database
 from app.main import app
+from conftest import login_test_client
 
 
 # Each test uses its own temporary SQLite database.
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, auth_env):
     test_db = tmp_path / "secureship_test.db"
     monkeypatch.setattr(database, "DB_PATH", test_db)
 
     # Start the FastAPI lifespan to initialize the test database.
     with TestClient(app) as test_client:
-        yield test_client
+        yield login_test_client(test_client)
 
 
 # TEST 1 — Home page
@@ -127,6 +128,7 @@ def test_sqlite_persistence(client):
 
     # A fresh TestClient triggers startup again, using the same temporary DB.
     with TestClient(app) as restarted_client:
+        login_test_client(restarted_client)
         response = restarted_client.get("/shipments")
 
     assert response.status_code == 200

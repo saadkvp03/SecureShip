@@ -22,6 +22,16 @@ DB_PATH = Path(
 )
 
 STATUSES = ("created", "in_transit", "delivered")
+ALLOWED_TRANSITIONS = {
+    "created": {"in_transit"},
+    "in_transit": {"delivered"},
+    "delivered": set(),
+}
+
+
+class InvalidStatusTransition(Exception):
+    """Raised when a shipment status transition is forbidden."""
+    pass
 
 # Readable tracking references: no 0/O or 1/I/L confusion.
 _TRACKING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -125,6 +135,9 @@ def init_database():
 
         for name, column_type in _ADDED_COLUMNS.items():
             if name not in existing:
+                # Reviewed: identifiers come from the fixed _ADDED_COLUMNS whitelist.
+                # See docs/07-semgrep-triage.md for the security justification.
+                # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 connection.execute(
                     f"ALTER TABLE shipments ADD COLUMN {name} {column_type}"
                 )
@@ -142,6 +155,16 @@ def init_database():
                         'delivered'
                     )),
                 occurred_at TEXT NOT NULL
+            )
+        """)
+
+        # Session cookies contain opaque random tokens. Only SHA-256 digests
+        # of session tokens are stored server-side; never store raw cookies.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                csrf_token TEXT NOT NULL,
+                expires_at INTEGER NOT NULL
             )
         """)
 
@@ -275,6 +298,10 @@ def count_shipments(search=None, status=None):
     where, params = _build_filters(search, status)
 
     with _connect() as connection:
+        # Reviewed: WHERE uses fixed SQL fragments from _build_filters().
+        # User-controlled values are passed as bound SQLite parameters.
+        # See docs/07-semgrep-triage.md for the security justification.
+        # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
         row = connection.execute(
             f"SELECT COUNT(*) AS total FROM shipments {where}",
             params,
@@ -319,6 +346,12 @@ def update_shipment_status(shipment_id, status):
             return None
 
         if current["status"] != status:
+            if status not in ALLOWED_TRANSITIONS[current["status"]]:
+                raise InvalidStatusTransition(
+                    f"Cannot change status from "
+                    f"{current['status']} to {status}"
+                )
+
             now = _now()
 
             connection.execute(

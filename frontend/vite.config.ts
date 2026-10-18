@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
         '/shipments': target,
         '/stats': target,
         '/health': target,
+        '/auth': target,
       },
     },
     build: { outDir: 'dist' },

@@ -1,0 +1,6 @@
+# Reuse pinned versions from the existing requirements file.
+-c requirements.txt
+
+# Production runtime dependencies.
+fastapi==0.143.0
+uvicorn==0.54.0

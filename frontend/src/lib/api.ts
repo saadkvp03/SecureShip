@@ -19,6 +19,35 @@ export class ApiError extends Error {
   }
 }
 
+export interface AuthInfo {
+  username: string
+  csrf_token: string
+}
+
+let csrfToken: string | null = null
+
+export async function getSession(): Promise<AuthInfo> {
+  const info = (await request<AuthInfo>('/auth/me')).data
+  csrfToken = info.csrf_token
+  return info
+}
+
+export async function login(username: string, password: string): Promise<AuthInfo> {
+  const info = (await request<AuthInfo>('/auth/login', {
+    method: 'POST', body: JSON.stringify({ username, password }),
+  })).data
+  csrfToken = info.csrf_token
+  return info
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await request<{ message: string }>('/auth/logout', { method: 'POST' })
+  } finally {
+    csrfToken = null
+  }
+}
+
 interface ValidationItem {
   loc?: Array<string | number>
   type?: string
@@ -48,13 +77,13 @@ async function request<T>(
   let response: Response
 
   try {
-    response = await fetch(path, {
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      },
-    })
+    const headers = new Headers(init.headers)
+    headers.set('Accept', 'application/json')
+    if (init.body) headers.set('Content-Type', 'application/json')
+    if (csrfToken && init.method && init.method !== 'GET') {
+      headers.set('X-CSRF-Token', csrfToken)
+    }
+    response = await fetch(path, { ...init, credentials: 'same-origin', headers })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error
@@ -84,6 +113,21 @@ async function request<T>(
       }
 
       throw new ApiError('Certains champs sont invalides.', 422, fields)
+    }
+
+    if (response.status === 401) {
+      if (path !== '/auth/login') {
+        csrfToken = null
+        window.dispatchEvent(new Event('secureship-auth-expired'))
+      }
+      throw new ApiError(
+        path === '/auth/login' ? 'Identifiant ou mot de passe incorrect.' : 'Session expirée. Reconnectez-vous.',
+        401,
+      )
+    }
+
+    if (response.status === 403) {
+      throw new ApiError('Requête refusée : vérification de sécurité (CSRF).', 403)
     }
 
     if (response.status === 404) {

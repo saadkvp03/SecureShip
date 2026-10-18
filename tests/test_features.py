@@ -1,3 +1,4 @@
+from http import client
 import re
 import sqlite3
 from pathlib import Path
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app import database, main
 from app.main import app
+from conftest import login_test_client
 
 TRACKING_PATTERN = re.compile(r"^SS-[A-HJ-NP-Z2-9]{6}$")
 
@@ -103,6 +105,76 @@ def test_status_change_is_recorded_once(client):
     ]
 
 
+def test_delivered_is_final(client):
+    shipment = make(client)
+    shipment_id = shipment["id"]
+    url = f"/shipments/{shipment_id}/status"
+
+    # Transitions autorisées
+    assert client.patch(
+        url, json={"status": "in_transit"}
+    ).status_code == 200
+
+    assert client.patch(
+        url, json={"status": "delivered"}
+    ).status_code == 200
+
+    # Sauvegarder l'état et l'historique
+    detail_url = f"/shipments/{shipment_id}"
+    before = client.get(detail_url).json()
+
+    # Transition interdite
+    response = client.patch(
+        url, json={"status": "created"}
+    )
+
+    assert response.status_code == 409
+
+    # Aucun changement de données ou d'historique
+    after = client.get(detail_url).json()
+    assert after["status"] == "delivered"
+    assert after["events"] == before["events"]
+
+@pytest.mark.parametrize(
+    "initial_path, forbidden_status",
+    [
+        ([], "delivered"),
+        (["in_transit"], "created"),
+        (["in_transit", "delivered"], "in_transit"),
+    ],
+)
+def test_forbidden_status_transitions(
+    client, initial_path, forbidden_status
+):
+    shipment = make(client)
+    shipment_id = shipment["id"]
+
+    status_url = f"/shipments/{shipment_id}/status"
+    detail_url = f"/shipments/{shipment_id}"
+
+    # Atteindre l'état initial par des transitions autorisées
+    for status in initial_path:
+        response = client.patch(
+            status_url, json={"status": status}
+        )
+        assert response.status_code == 200
+
+    # Sauvegarder les données avant la tentative interdite
+    before = client.get(detail_url).json()
+
+    # Tenter une transition interdite
+    response = client.patch(
+        status_url,
+        json={"status": forbidden_status}
+    )
+
+    assert response.status_code == 409
+
+    # Vérifier que ni le colis ni l'historique n'ont changé
+    after = client.get(detail_url).json()
+    assert after == before
+
+
 # ------------------------------------------------------------------ listing
 
 
@@ -143,7 +215,15 @@ def test_search_is_safe_against_sql_injection(client):
 def test_filter_by_status(client):
     first = make(client, "A")
     make(client, "B")
-    client.patch(f"/shipments/{first['id']}/status", json={"status": "delivered"})
+    url = f"/shipments/{first['id']}/status"
+
+    assert client.patch(
+        url, json={"status": "in_transit"}
+    ).status_code == 200
+
+    assert client.patch(
+        url, json={"status": "delivered"}
+    ).status_code == 200
 
     delivered = client.get("/shipments", params={"status": "delivered"})
     assert [s["recipient"] for s in delivered.json()] == ["A"]
@@ -197,14 +277,22 @@ def test_stats_reflect_stored_data(client):
     b = make(client, "B")
     make(client, "C")
     client.patch(f"/shipments/{a['id']}/status", json={"status": "in_transit"})
-    client.patch(f"/shipments/{b['id']}/status", json={"status": "delivered"})
+    url_b = f"/shipments/{b['id']}/status"
+
+    assert client.patch(
+        url_b, json={"status": "in_transit"}
+    ).status_code == 200
+
+    assert client.patch(
+        url_b, json={"status": "delivered"}
+    ).status_code == 200
 
     stats = client.get("/stats").json()
     assert stats["total"] == 3
     assert stats["by_status"] == {"created": 1, "in_transit": 1, "delivered": 1}
 
     activity = stats["recent_activity"]
-    assert len(activity) == 5  # 3 creations + 2 status changes
+    assert len(activity) == 6  # 3 creations + 3 status changes
     assert activity[0]["to_status"] == "delivered"
     assert activity[0]["recipient"] == "B"
 
@@ -234,6 +322,7 @@ def test_legacy_database_is_upgraded_without_data_loss(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", legacy)
 
     with TestClient(app) as client:
+        login_test_client(client)
         shipments = client.get("/shipments").json()
         assert len(shipments) == 1
         assert shipments[0]["recipient"] == "Old Client"
