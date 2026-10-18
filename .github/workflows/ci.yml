@@ -9,7 +9,7 @@ on:
   pull_request:
     branches:
       - main
-      
+
 permissions:
   contents: read
 
@@ -77,7 +77,7 @@ jobs:
             >> /tmp/secureship-ci.env
           docker run -d --name secureship-ci -p 127.0.0.1:8000:8000 \
             --env-file /tmp/secureship-ci.env secureship:ci
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             curl -fsS http://127.0.0.1:8000/health && break
             sleep 1
           done
@@ -98,6 +98,36 @@ jobs:
             -d '{"recipient":"CI","destination":"Rabat"}'
           curl -fsS -b /tmp/secureship-ci-cookies http://127.0.0.1:8000/stats
           rm -f /tmp/secureship-ci.env /tmp/secureship-ci-cookies /tmp/secureship-ci-login.json
+
+      # Complete vulnerability report for audit and investigation
+      - name: Trivy - Generate vulnerability report
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: secureship:ci
+          scanners: vuln
+          format: json
+          output: trivy-report.json
+          exit-code: '0'
+          version: v0.76.0
+
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: secureship-trivy-report
+          path: trivy-report.json
+          retention-days: 14
+
+      # Fail CI when fixable HIGH or CRITICAL vulnerabilities are found
+      - name: Trivy - Security gate
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: secureship:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          skip-setup-trivy: true
+
 
       - name: Show container logs on failure
         if: failure()
@@ -120,3 +150,69 @@ jobs:
 
       - name: Scan backend and frontend
         run: semgrep scan --config auto --error app/ frontend/src/
+  gitleaks:
+    name: Gitleaks Secret Scanning
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Git history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan for exposed secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+  sca:
+    name: Software Composition Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: python -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit frontend production dependencies
+        run: npm --prefix frontend audit --omit=dev
+  checkov:
+    name: Checkov Configuration Security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Checkov
+        run: python -m pip install checkov==3.3.20
+
+      - name: Scan Dockerfile
+        run: checkov -f Dockerfile --framework dockerfile
+
+      - name: Scan GitHub Actions workflows
+        run: checkov -d .github/workflows --framework github_actions
