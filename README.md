@@ -6,9 +6,11 @@
 
 **A local-only application security and DevSecOps laboratory** combining a real FastAPI + React shipment application with authentication, Docker hardening, and automated security gates.
 
-<img width="1448" height="1086" alt="SecureShip DevSecOps Workflow English" src="https://github.com/user-attachments/assets/28993f64-8517-4a35-88a4-7f939488254b" />
+## DevSecOps at a Glance
 
-*Workflow diagram: the `docker` job depends on `test` and `frontend`; Semgrep, Gitleaks, SCA and Checkov run as independent jobs. Actionlint is currently a local check, not a GitHub Actions job.*
+![SecureShip end-to-end DevSecOps workflow](docs/assets/workflow-global.png)
+
+*Overall project lifecycle, from local FastAPI/React development to GitHub, automated quality and security checks, Docker packaging and a validated local application. The seven GitHub Actions jobs are listed below; Actionlint is a local-only check.*
 
 ## 1. Project Overview
 
@@ -43,6 +45,20 @@ The project simulates a fictional logistics company that manages shipments. It i
 - **Shipment details:** information, tracker (created → in transit → delivered) and the real history of status changes with timestamps.
 - Light and dark themes, responsive layout (desktop, tablet, phone), toast notifications, loading and error states, keyboard-accessible controls.
 - The interface is in French. A **single local operator login** now protects the shipment API. It remains a local-only security laboratory, not a production application.
+
+### Application Preview — Local Deployment
+
+The following screenshots show the **actual locally hosted SecureShip interface** at `http://127.0.0.1:8000/app/`, using fictional shipment data. They do not represent a public Internet deployment.
+
+**Operator login (before authentication)**
+
+<img src="docs/assets/app-login.png" alt="SecureShip local operator login screen with empty fields" width="650" />
+
+**Authenticated dashboard**
+
+![SecureShip authenticated shipment dashboard with status overview and recent activity](docs/assets/app-dashboard.png)
+
+The dashboard retrieves shipment counts and history from SQLite after login; protected API endpoints are not exposed to anonymous users.
 
 ### API endpoints
 
@@ -138,7 +154,7 @@ SecureShip/
 │   │   └── lib/            # API client, router, hooks, formatting
 │   └── package.json
 ├── docs/                   # Threat model, triage and security documentation
-│   └── assets/             # DevSecOps workflow diagram (add supplied PNG here)
+│   └── assets/             # Curated README diagrams and non-sensitive screenshots
 ├── infra/
 │   └── terraform/          # Infrastructure as Code (planned)
 ├── scripts/
@@ -148,7 +164,7 @@ SecureShip/
 │   ├── test_auth.py        # Authentication security regressions
 │   ├── test_main.py        # Original 9 API tests
 │   ├── test_features.py    # Tests for the new features
-│   └── test_sql_regression.py # SQL injection regression tests
+│   ├── test_sqli_regression.py # SQL injection regression tests
 │   └── conftest.py
 ├── Dockerfile              # Multi-stage, minimum runtime deps, non-root user
 ├── docker-compose.yml
@@ -157,7 +173,7 @@ SecureShip/
 └── requirements.txt        # Pinned dependency inventory for local development/tests
 ```
 
-`.env`, `.venv/`, `node_modules/`, `frontend/dist/`, `.pytest_cache/` and local `*.db` files are excluded from Git. Keep scan JSON outputs, screenshots and other evidence outside the repository unless explicitly curated and redacted.
+`.env`, `.venv/`, `node_modules/`, `frontend/dist/`, `.pytest_cache/` and local `*.db` files are excluded from Git. Keep raw scanner JSON outputs and unreviewed screenshots outside the repository. Only the curated, non-sensitive screenshots in `docs/assets/` are intended for publication.
 
 ## 6. Run Locally
 
@@ -229,6 +245,10 @@ python -m pytest -q
 
 The suite includes authentication regressions in `tests/test_auth.py` as well as the original 9 tests (`tests/test_main.py`) plus tests for details, history, tracking references, search, filters, sorting, pagination, statistics, the upgrade of a legacy database, and the `/app` route. Each test uses its own temporary database.
 
+**Local test evidence — 53 tests passed (October 2026 baseline):**
+
+![Pytest terminal showing 53 tests passed](docs/assets/pytest-53-passed.png)
+
 Frontend checks:
 
 ```bash
@@ -258,6 +278,12 @@ docker compose up --build
 
 Open http://127.0.0.1:8000/app (API docs at `/docs`). Stop with `Ctrl+C`; data stays in the `secureship-data` volume.
 
+**Docker Desktop — locally running SecureShip Compose project:**
+
+![Docker Desktop listing the running SecureShip Compose project](docs/assets/docker-desktop.png)
+
+*The green dot indicates a running Compose project in this historical screenshot. The project is collapsed here; it does not show an individual container's details or prove public deployment.*
+
 Without Compose:
 
 ```bash
@@ -280,7 +306,26 @@ The Dockerfile builds the interface in a Node stage, then copies only the compil
 
 GitHub Actions uses [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The workflow runs on pushes to `main` and `feature/**`, and on pull requests targeting `main`. It validates changes; **it does not deploy the application**.
 
-The job graph is illustrated in the workflow diagram at the top of this README.
+### What Happens When a Developer Changes Code?
+
+A typical change moves through this review loop: **edit → local checks → Git commit and push → GitHub pull request → automated CI gates → fix/re-run if necessary → merge into `main`**. The pipeline validates changes; it does **not** deploy an application automatically.
+
+![SecureShip code change workflow with local checks, GitHub Actions and remediation loops](docs/assets/workflow-code-change.png)
+
+The diagram is an illustrative developer workflow; local checks depend on what was actually executed. The GitHub Actions job graph itself has the dependencies described below.
+
+### Actual GitHub Actions Job Graph
+
+The `docker` job starts only after both `test` and `frontend` succeed. Semgrep, Gitleaks, SCA and Checkov are separate parallel checks.
+
+<details>
+<summary>View the successful seven-job dependency graph from GitHub Actions</summary>
+
+![Successful SecureShip GitHub Actions workflow graph showing all seven jobs](docs/assets/github-actions-job-graph.png)
+
+*For current results, consult the [live GitHub Actions page](https://github.com/saadkvp03/SecureShip/actions).*
+
+</details>
 
 | Job | Purpose | Gate / outputs |
 | --- | --- | --- |
@@ -322,6 +367,61 @@ Live CI results: [SecureShip GitHub Actions](https://github.com/saadkvp03/Secure
 
 For this **localhost-only educational environment**, residual risks are documented and reviewed rather than masked with blanket suppressions or potentially destabilizing dependency upgrades. Reassess all findings before any change of scope or exposure.
 
+### Selected Security Testing Evidence
+
+These screenshots document **historical, authorized local tests**, not a claim that every vulnerability has been eliminated. Sensitive configuration, real tokens and local databases are deliberately excluded. The dedicated security reports provide the detailed interpretation.
+
+<details>
+<summary><strong>Semgrep SAST — initial findings, reviewed suppression and a blocking demonstration</strong></summary>
+
+**Initial scan:** three SQL-construction findings in trusted application code were triaged and investigated (452 OSS rules on 25 files).
+
+![Semgrep initial security scan reporting three reviewed findings](docs/assets/semgrep-before-triage.png)
+
+**After review:** precisely scoped `nosemgrep` suppressions, supported by parameterized-query analysis and an SQL injection regression test; zero reported findings in the scanned scope. A clean scan does not prove the absence of every possible flaw.
+
+![Semgrep scan showing zero findings after triage](docs/assets/semgrep-after-triage.png)
+
+**Blocking behavior demonstrated locally:** a separate disposable test file containing deliberately vulnerable code yielded two blocking findings and an exit code of `1`. This was **not** run against the actual application source or committed to the repository.
+
+![Semgrep controlled vulnerable sample with two blocking findings and exit code 1](docs/assets/semgrep-blocking-demo.png)
+
+See [`docs/07-semgrep-triage.md`](docs/07-semgrep-triage.md).
+
+</details>
+
+<details>
+<summary><strong>SQL injection regression — bound query parameters</strong></summary>
+
+A disposable SQLite database held one fictional shipment. The payload `' OR 1=1 --` was passed to the search and status filters; both returned zero matches instead of bypassing them. The corresponding automated test is `tests/test_sqli_regression.py`.
+
+![SQL injection test using an isolated SQLite database, with assertions passing](docs/assets/sql-injection-regression.png)
+
+*This single payload and these tested paths do not constitute a complete SQL injection audit.*
+
+</details>
+
+<details>
+<summary><strong>Gitleaks — why deleting a secret from the latest file is insufficient</strong></summary>
+
+A **separate throwaway Git repository** with a **synthetic token** was created for a safe demonstration. A directory-only scan reported no current leak:
+
+![Gitleaks working-directory scan of disposable lab finding no leak](docs/assets/gitleaks-working-tree-clean.png)
+
+Scanning Git history detected one historical finding:
+
+![Gitleaks Git history scan detecting one synthetic leaked token](docs/assets/gitleaks-history-detected.png)
+
+Deleting the token in a later commit did **not** erase it from Git history; the historical finding remained:
+
+![Gitleaks Git history scan finding the historical synthetic token after deletion from current files](docs/assets/gitleaks-history-after-deletion.png)
+
+*This is a demonstration repository, **not** a leak from SecureShip. The real SecureShip repository passed its own Gitleaks CI scan.*
+
+</details>
+
+Trivy's complete JSON artifact and the dependency/configuration audit results are documented in [`docs/03-security-findings.md`](docs/03-security-findings.md) and [`docs/04-remediation-validation.md`](docs/04-remediation-validation.md). We do not include raw scanner reports or secrets in this README package.
+
 ## 11. DevSecOps & Security Roadmap
 
 - [x] Define the scope and architecture; implement FastAPI, SQLite and the React interface.
@@ -334,7 +434,9 @@ For this **localhost-only educational environment**, residual risks are document
 - [x] Integrate Gitleaks, Python/npm SCA and Checkov into CI.
 - [x] Validate the GitHub Actions workflow locally with Actionlint + ShellCheck.
 - [x] Merge security-hardening Pull Request [#2](https://github.com/saadkvp03/SecureShip/pull/2) after successful checks.
-- [ ] Complete remaining detailed security findings, remediation evidence and final report.
+- [x] Document the security findings and remediation-validation baseline.
+- [x] Curate selected, non-sensitive README screenshots showing the application and controlled validation tests.
+- [ ] Complete the final security report and review all evidence before publication.
 - [ ] Perform a separately scoped OWASP ZAP DAST assessment against the authorized local application.
 - [ ] Consider adding Actionlint to CI and improving dependency/tool version pinning and reporting.
 
@@ -344,14 +446,13 @@ The `docs/` directory includes the following project documentation (some reports
 
 - [`01-scope-architecture.md`](docs/01-scope-architecture.md) — project scope and architecture.
 - [`02-threat-model.md`](docs/02-threat-model.md) — threats and security controls.
-- [`03-security-findings.md`](docs/03-security-findings.md) — security findings / in-progress reporting.
-- [`04-remediation-validation.md`](docs/04-remediation-validation.md) — remediation and validation / in-progress reporting.
+- [`03-security-findings.md`](docs/03-security-findings.md) — documented SAST, container, SCA, secrets and configuration findings, including residual risks.
+- [`04-remediation-validation.md`](docs/04-remediation-validation.md) — implemented fixes, test evidence, CI results and remaining remediation work.
 - [`05-final-report.md`](docs/05-final-report.md) — final report / in-progress reporting.
 - [`06-authentication.md`](docs/06-authentication.md) — session, login, CSRF design and local evidence plan.
-- [`07-semgrep-triage.md`](docs/07-semgrep-triage.md) — Semgrep findings and false-positive analysis.
-- `assets/devsecops-workflow.png` — CI architecture diagram **supplied with this README update** (must be placed under `docs/assets/`).
+- [`07-semgrep-triage.md`](docs/07-semgrep-triage.md) — initial Semgrep findings, reviewed suppressions, SQLi regression and enabled blocking gate.
 
-Security evidence such as scanner JSON reports or terminal screenshots is kept outside Git by default. Only intentionally selected, redacted evidence should be published.
+The `docs/assets/` directory contains the two workflow diagrams and selected non-sensitive screenshots used in this README. Raw scanner JSON reports and unreviewed local evidence are kept outside Git by default.
 
 ## 13. Limitations & Security Notes
 
@@ -384,4 +485,4 @@ From the SecureShip project directory, after `docker compose up -d --build`:
 5. Run `curl -i http://127.0.0.1:8000/shipments`: **HTTP 401** is expected without authentication.
 6. Run `python -m pytest -q`: the validated October 2026 snapshot passed **53 tests**.
 
-Keep portfolio screenshots on your local machine unless you intentionally publish sanitized copies. Never capture or publish your actual password, `.env`, cookies, CSRF tokens or other credentials. See [`docs/06-authentication.md`](docs/06-authentication.md) for the security design.
+Keep unreviewed portfolio screenshots on your local machine unless you intentionally publish sanitized, non-sensitive copies. Never capture or publish your actual password, `.env`, cookies, CSRF tokens or other credentials. See [`docs/06-authentication.md`](docs/06-authentication.md) for the security design.
