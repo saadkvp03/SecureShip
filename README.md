@@ -6,7 +6,7 @@
 
 **A local-only application security and DevSecOps laboratory** combining a real FastAPI + React shipment application with authentication, Docker hardening, and automated security gates.
 
-<img width="1448" height="1086" alt="SecureShip DevSecOps Workflow English" src="https://github.com/user-attachments/assets/f16ce68e-f186-4ee5-a1a0-f7b2af0bcffa" />
+<img width="1448" height="1086" alt="SecureShip DevSecOps Workflow English" src="https://github.com/user-attachments/assets/28993f64-8517-4a35-88a4-7f939488254b" />
 
 *Workflow diagram: the `docker` job depends on `test` and `frontend`; Semgrep, Gitleaks, SCA and Checkov run as independent jobs. Actionlint is currently a local check, not a GitHub Actions job.*
 
